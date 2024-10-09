@@ -6,26 +6,56 @@
       </ion-toolbar>
     </ion-header>
     <ion-content class="ion-padding">
-      <div>
+      <div class="coin-display">
         <h2>Your Coins: {{ coins }}</h2>
         <p v-if="!motionSupported">Motion tracking not available on this device!</p>
       </div>
 
       <!-- Slot Machine Section -->
-      <div class="slot-machine">
-        <h3>One-Eyed Bandit Slot Machine</h3>
-        <div class="slots">
-          <span>{{ slot1 }}</span> | <span>{{ slot2 }}</span> | <span>{{ slot3 }}</span>
+      <div class="slot-machine--new">
+        <div class="slot-machine--new--overlay"></div>
+
+        <!-- Column 1 -->
+        <div class="column">
+          <div
+            v-for="index in displayIndices"
+            :key="'col1-' + index"
+            :class="['field', isWinningField(0, index) ? 'winning-field' : '']"
+          >
+            {{ symbolsCol1[index] }}
+          </div>
         </div>
 
-        <p>Bet: {{ betAmount }} coins</p>
-        <p v-if="gameResult">{{ gameResult }}</p>
+        <!-- Column 2 -->
+        <div class="column">
+          <div
+            v-for="index in displayIndices"
+            :key="'col2-' + index"
+            :class="['field', isWinningField(1, index) ? 'winning-field' : '']"
+          >
+            {{ symbolsCol2[index] }}
+          </div>
+        </div>
 
-        <!-- Button to Spin the Slot Machine -->
-        <ion-button @click="spinSlotMachine" :disabled="coins < betAmount">Spin (Bet 10 Coins)</ion-button>
+        <!-- Column 3 -->
+        <div class="column">
+          <div
+            v-for="index in displayIndices"
+            :key="'col3-' + index"
+            :class="['field', isWinningField(2, index) ? 'winning-field' : '']"
+          >
+            {{ symbolsCol3[index] }}
+          </div>
+        </div>
+      </div>
 
-        <!-- Reset Button -->
-        <ion-button @click="resetGame">Reset Game</ion-button>
+      <div style="height: 70px">
+        <p class="bet-info">Bet: {{ betAmount }} coins</p>
+        <p v-show="gameResult" class="game-result">{{ gameResult }}</p>
+      </div>
+      <div style="text-align: center;">
+        <ion-button @click="start" color="primary">Start</ion-button>
+        <ion-button @click="stop" color="secondary">Stop</ion-button>
       </div>
     </ion-content>
   </ion-page>
@@ -34,143 +64,254 @@
 <script lang="ts">
 import { ref, onMounted, onBeforeUnmount } from 'vue';
 import { Motion } from '@capacitor/motion';
-import { Plugins } from '@capacitor/core';
-const { BackgroundTask } = Plugins;
+
 export default {
   setup() {
-    // Define state variables using Vue 3's Composition API
-    const coins = ref<number>(0);          // Tracks coins (1 motion event = 1 coin)
-    const betAmount = ref<number>(10);     // Fixed bet amount for each spin
-    const slot1 = ref<string>('');         // Slot reel 1 result
-    const slot2 = ref<string>('');         // Slot reel 2 result
-    const slot3 = ref<string>('');         // Slot reel 3 result
-    const gameResult = ref<string>('');    // Result of the slot machine spin
-    const slotSymbols = ref<string[]>(['🍒', '🍋', '🍉', '⭐', '💎']); // Slot machine symbols
-    const motionSupported = ref<boolean>(true); // To check if motion tracking is available
+    // Reactive state variables
+    const coins = ref<number>(50);
+    const betAmount = ref<number>(10);
+    const gameResult = ref<string>('');
+    const motionSupported = ref<boolean>(true);
 
-    const accelerationThreshold = 1.5; // Set a threshold to avoid false step detection
+    // Slot machine symbols and columns
+    const slotSymbols = ['🍒', '🍋', '🍉', '⭐', '💎'];
+    const symbolsCol1 = ref<string[]>([]);
+    const symbolsCol2 = ref<string[]>([]);
+    const symbolsCol3 = ref<string[]>([]);
+
+    // Display indices for the visible symbols
+    const displayIndices = [4, 5, 6];
+
+    // Winning positions to highlight
+    const winningPositions = ref<number[]>([]);
+
+    // Variables for motion tracking
+    const accelerationThreshold = 1.5;
     let lastStepTime = Date.now();
 
-    // Start tracking motion to simulate step tracking
+    // Control variables
+    const running = ref<boolean>(false);
+    let intervalId1: number;
+    let intervalId2: number;
+    let intervalId3: number;
+
+    // Start motion tracking
     const startMotionTracking = () => {
       try {
         Motion.addListener('accel', (event) => {
           const { x, y, z } = event.accelerationIncludingGravity;
-
-          // Calculate the total force on the device (ignore small movements)
           const totalForce = Math.sqrt(x * x + y * y + z * z);
-
-          // Detect a "step" only if the force exceeds the threshold and sufficient time has passed
           const currentTime = Date.now();
           if (totalForce > accelerationThreshold && currentTime - lastStepTime > 500) {
-            lastStepTime = currentTime; // Update last step time
-            coins.value += 1; // Increment coin (step count)
+            lastStepTime = currentTime;
+            coins.value += 1;
           }
         });
       } catch (error) {
-        console.error("Motion tracking not supported", error);
+        console.error('Motion tracking not supported', error);
         motionSupported.value = false;
       }
     };
 
-    // Slot machine logic
-    const spinSlotMachine = () => {
-      if (coins.value >= betAmount.value) {
-        // Deduct the bet amount
-        coins.value -= betAmount.value;
+    // Start spinning the slot machine
+    const start = () => {
+      if (coins.value < betAmount.value) {
+        gameResult.value = 'Not enough coins to spin!';
+        return;
+      }
+      coins.value -= betAmount.value;
+      running.value = true;
+      gameResult.value = '';
+      winningPositions.value = [];
+    };
 
-        // Generate random values for each slot
-        slot1.value = getRandomSlot();
-        slot2.value = getRandomSlot();
-        slot3.value = getRandomSlot();
+    // Stop spinning and check the result
+    const stop = () => {
+      running.value = false;
+      checkResult();
+    };
 
-        // Check slot result
-        checkSlotResult();
+    // Check for winning combinations and highlight winning fields
+    const checkResult = () => {
+      winningPositions.value = [];
+      let winnings = 0;
+
+      // Define combinations with their positions
+      const combinations = [
+        // Rows
+        {
+          symbols: [symbolsCol1.value[4], symbolsCol2.value[4], symbolsCol3.value[4]],
+          positions: [0, 3, 6],
+        },
+        {
+          symbols: [symbolsCol1.value[5], symbolsCol2.value[5], symbolsCol3.value[5]],
+          positions: [1, 4, 7],
+        },
+        {
+          symbols: [symbolsCol1.value[6], symbolsCol2.value[6], symbolsCol3.value[6]],
+          positions: [2, 5, 8],
+        },
+        // Columns
+        {
+          symbols: [symbolsCol1.value[4], symbolsCol1.value[5], symbolsCol1.value[6]],
+          positions: [0, 1, 2],
+        },
+        {
+          symbols: [symbolsCol2.value[4], symbolsCol2.value[5], symbolsCol2.value[6]],
+          positions: [3, 4, 5],
+        },
+        {
+          symbols: [symbolsCol3.value[4], symbolsCol3.value[5], symbolsCol3.value[6]],
+          positions: [6, 7, 8],
+        },
+        // Diagonals
+        {
+          symbols: [symbolsCol1.value[4], symbolsCol2.value[5], symbolsCol3.value[6]],
+          positions: [0, 4, 8],
+        },
+        {
+          symbols: [symbolsCol1.value[6], symbolsCol2.value[5], symbolsCol3.value[4]],
+          positions: [2, 4, 6],
+        },
+      ];
+
+      // Check each combination
+      combinations.forEach((combination) => {
+        if (new Set(combination.symbols).size === 1) {
+          winnings += betAmount.value * 2;
+          winningPositions.value.push(...combination.positions);
+        }
+      });
+
+      // Update coins and game result
+      if (winnings > 0) {
+        coins.value += winnings;
+        gameResult.value = `You won ${winnings} coins!`;
       } else {
-        gameResult.value = "Not enough coins to spin!";
+        gameResult.value = 'You lost!';
       }
     };
 
-    // Generate a random slot symbol
-    const getRandomSlot = (): string => {
-      const randomIndex = Math.floor(Math.random() * slotSymbols.value.length);
-      return slotSymbols.value[randomIndex];
+    // Function to check if a field is a winning field
+    const isWinningField = (columnIndex: number, symbolIndex: number): boolean => {
+      const positionIndex = columnIndex * 3 + (symbolIndex - 4);
+      return winningPositions.value.includes(positionIndex);
     };
 
-    // Check the result of the slot machine spin
-    const checkSlotResult = () => {
-      if (slot1.value === slot2.value && slot2.value === slot3.value) {
-        // Jackpot! All three symbols match
-        coins.value += betAmount.value * 10;  // Win 10x the bet
-        gameResult.value = `Jackpot! You won ${betAmount.value * 10} coins!`;
-      } else if (slot1.value === slot2.value || slot2.value === slot3.value || slot1.value === slot3.value) {
-        // Partial match
-        coins.value += betAmount.value * 2;  // Win 2x the bet
-        gameResult.value = `You won ${betAmount.value * 2} coins!`;
-      } else {
-        // No match
-        gameResult.value = "You lost! Better luck next time!";
+    // Initialize the slot machine columns
+    const initializeColumns = () => {
+      for (let i = 0; i < 10; i++) {
+        symbolsCol1.value.push(slotSymbols[Math.floor(Math.random() * slotSymbols.length)]);
+        symbolsCol2.value.push(slotSymbols[Math.floor(Math.random() * slotSymbols.length)]);
+        symbolsCol3.value.push(slotSymbols[Math.floor(Math.random() * slotSymbols.length)]);
       }
-    };
-
-    // Reset the game
-    const resetGame = () => {
-      gameResult.value = "";
-      slot1.value = slot2.value = slot3.value = '';
-    };
-
-    // Continue background task when the app is minimized
-    const continueBackgroundTask = () => {
-      setTimeout(() => {
-        // Keep tracking motion or other necessary operations
-      }, 2000);
     };
 
     onMounted(() => {
-      // Start motion tracking on component mount
+      initializeColumns();
       startMotionTracking();
 
-      // Enable background task using Capacitor's BackgroundTask plugin
-      BackgroundTask.beforeExit(() => {
-        continueBackgroundTask();
-      });
+      // Spin column 1
+      intervalId1 = setInterval(() => {
+        if (running.value) {
+          const first = symbolsCol1.value.shift()!;
+          symbolsCol1.value.push(first);
+        }
+      }, 100);
+
+      // Spin column 2
+      intervalId2 = setInterval(() => {
+        if (running.value) {
+          const first = symbolsCol2.value.shift()!;
+          symbolsCol2.value.push(first);
+        }
+      }, 150);
+
+      // Spin column 3
+      intervalId3 = setInterval(() => {
+        if (running.value) {
+          const first = symbolsCol3.value.shift()!;
+          symbolsCol3.value.push(first);
+        }
+      }, 200);
     });
 
     onBeforeUnmount(() => {
-      // Remove motion listeners when the component is destroyed
       Motion.removeAllListeners();
+      clearInterval(intervalId1);
+      clearInterval(intervalId2);
+      clearInterval(intervalId3);
     });
 
     return {
       coins,
       betAmount,
-      slot1,
-      slot2,
-      slot3,
       gameResult,
       motionSupported,
-      spinSlotMachine,
-      resetGame,
+      symbolsCol1,
+      symbolsCol2,
+      symbolsCol3,
+      start,
+      stop,
+      isWinningField,
+      displayIndices,
     };
-  }
+  },
 };
 </script>
 
 <style scoped>
-h2 {
-  font-size: 2em;
+.coin-display {
   text-align: center;
-  margin-top: 20px;
+  margin-bottom: 20px;
 }
 
-.slot-machine {
-  text-align: center;
-  margin-top: 40px;
+.slot-machine--new {
+  display: flex;
+  justify-content: center;
+  position: relative;
+  width: 320px;
+  margin: 0 auto;
+  background-color: #000;
+  padding: 10px;
+  border-radius: 10px;
 }
 
-.slots {
-  font-size: 2em;
-  margin: 20px 0;
+.slot-machine--new .column {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin: 0 5px;
+}
+
+.field {
+  font-size: 66px;
+  height: 100px;
+  width: 100px;
+  background: white;
+  border: 1px solid black;
+  margin: 5px 0;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.winning-field {
+  background-color: yellow;
+  border: 2px solid red;
+}
+
+.bet-info {
+  text-align: center;
+  margin-top: 10px;
+  font-weight: bold;
+}
+
+.game-result {
+  text-align: center;
+  font-size: 1.5em;
+  margin-top: 10px;
 }
 
 ion-button {
