@@ -1,0 +1,7 @@
+{
+  "name": "gambleStep",
+  "integrations": {
+    "capacitor": {}
+  },
+  "type": "vue-vite"
+}
