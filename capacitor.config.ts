@@ -10,10 +10,6 @@ const config: CapacitorConfig = {
     SplashScreen: {
       launchShowDuration: 0,
     }
-  },
-  server: {
-    url: 'http://localhost:8080',
-    cleartext: true
   }
 };
 
