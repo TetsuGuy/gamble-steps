@@ -48,12 +48,24 @@ export default {
     const slotSymbols = ref<string[]>(['🍒', '🍋', '🍉', '⭐', '💎']); // Slot machine symbols
     const motionSupported = ref<boolean>(true); // To check if motion tracking is available
 
+    const accelerationThreshold = 1.5; // Set a threshold to avoid false step detection
+    let lastStepTime = Date.now();
+
     // Start tracking motion to simulate step tracking
     const startMotionTracking = () => {
       try {
-        Motion.addListener('accel', () => {
-          // Each motion event simulates a step and adds coins
-          coins.value += 1;
+        Motion.addListener('accel', (event) => {
+          const { x, y, z } = event.accelerationIncludingGravity;
+
+          // Calculate the total force on the device (ignore small movements)
+          const totalForce = Math.sqrt(x * x + y * y + z * z);
+
+          // Detect a "step" only if the force exceeds the threshold and sufficient time has passed
+          const currentTime = Date.now();
+          if (totalForce > accelerationThreshold && currentTime - lastStepTime > 500) {
+            lastStepTime = currentTime; // Update last step time
+            coins.value += 1; // Increment coin (step count)
+          }
         });
       } catch (error) {
         console.error("Motion tracking not supported", error);
